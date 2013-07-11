@@ -110,36 +110,32 @@ class STK500():
   def __init__(self, serialport):
     self.ser = serial.Serial(serialport, baudrate=115200)
     self.comms = _CommsEngine(self.ser)
-    self.seq = 0
 
   def sign_on(self):
-    resp = self.comms.sendrecv(self.seq, [self.CMD_SIGN_ON], 0.2)
+    resp = self.comms.sendrecv([self.CMD_SIGN_ON], 0.2)
     if resp[3:] == 'AVRISP_2':
       self.programmertype = 'avrisp2'
     elif resp[3:] == 'STK500_2':
       self.programmertype = 'stk500_2'
     else:
       raise Exception("Unkown programmer type: {0}".format(resp[3:]))
-    self.seq += 1
 
   def set_parameter(self, param, value):
-    resp = self.comms.sendrecv(self.seq, 
+    resp = self.comms.sendrecv(
         [self.CMD_SET_PARAMETER, param, value])
     if resp[0] != self.CMD_SET_PARAMETER or resp[1] != self.STATUS_CMD_OK:
       raise IOError("Error setting parameter {0} to value {0}.".format(param, value))
-    self.seq += 1
 
   def get_parameter(self, param):
-    resp = self.comms.sendrecv(self.seq, 
+    resp = self.comms.sendrecv(
         [self.CMD_GET_PARAMETER, param])
     if resp[0] != self.CMD_GET_PARAMETER or resp[1] != self.STATUS_CMD_OK:
       raise IOError("Error getting parameter: {0}.".format(param))
     else:
-      self.seq += 1
       return resp[2]
 
   def osccal(self):
-    resp = self.comms.sendrecv(self.seq, [self.CMD_OSCCAL])
+    resp = self.comms.sendrecv([self.CMD_OSCCAL])
     return resp[1]
 
   def load_address(self, address):
@@ -148,11 +144,10 @@ class STK500():
     addrbytes[1] = (address >> 16) & 0x00ff
     addrbytes[2] = (address >> 8) & 0x00ff
     addrbytes[3] = address & 0x00ff
-    resp = self.comms.sendrecv(self.seq, 
+    resp = self.comms.sendrecv(
         bytearray([self.CMD_LOAD_ADDRESS]) + addrbytes)
     if resp[0] != self.CMD_LOAD_ADDRESS or resp[1] != self.STATUS_CMD_OK:
       raise IOError("Error loading address.")
-    self.seq += 1
 
   def enter_progmode_isp(
       self, 
@@ -167,7 +162,6 @@ class STK500():
     if len(cmdbytes) != 4:
       raise Exception("Expected 4 command bytes. Got {0}.".format(len(cmdbytes)))
     resp = self.comms.sendrecv(
-        self.seq, 
         bytearray(
           [
             self.CMD_ENTER_PROGMODE_ISP, 
@@ -182,17 +176,34 @@ class STK500():
         ) + bytearray(cmdbytes), 5 )
     if resp[0] != self.CMD_ENTER_PROGMODE_ISP or resp[1] != self.STATUS_CMD_OK:
       raise IOError("Could not enter programming mode")
-    self.seq += 1
 
   def spi_multi(self, numRX, data, rxStartAddr):
-    resp = self.comms.sendrecv(self.seq,
+    resp = self.comms.sendrecv(
         bytearray([self.CMD_SPI_MULTI, len(data), numRX, rxStartAddr]) + bytearray(data))
     if resp[0] != self.CMD_SPI_MULTI or resp[1] != self.STATUS_CMD_OK:
       raise IOError("Error executing ISP command.")
-    self.seq += 1
     return resp[2:-1]
 
+  def chip_erase_isp(self, eraseDelay, pollMethod, cmdbytes):
+    if len(cmdbytes) != 4:
+      raise Exception("Expected 4 command bytes. Got {0}.".format(len(cmdbytes)))
+    resp = self.comms.sendrecv(
+        bytearray([self.CMD_CHIP_ERASE_ISP, eraseDelay, pollMethod])+bytearray(cmdbytes))
+    if resp[0] != self.CMD_CHIP_ERASE_ISP or resp[1] != self.STATUS_CMD_OK:
+      raise IOError("Error erasing chip.")
+
+  def program_flash_isp(self, numbytes, mode, delay, cmd1, cmd2, cmd3, poll1, poll2, data):
+    buf = bytearray([self.CMD_PROGRAM_FLASH_ISP])
+    buf += bytearray([ (numbytes >> 8) & 0x00ff ])
+    buf += bytearray([ numbytes & 0x00ff ])
+    buf += bytearray([ mode, delay, cmd1, cmd2, cmd3, poll1, poll2])
+    buf += bytearray( data )
+    resp = self.comms.sendrecv(buf, timeout=5)
+    if resp[0] != self.CMD_PROGRAM_FLASH_ISP or resp[1] != self.STATUS_CMD_OK:
+      raise IOError("Error programming flash.")
+
 class ATmega128rfa1Programmer(STK500):
+  WORDSIZE = 2 # Word size in bytes, for addressing
   def __init__(self, serialport):
     STK500.__init__(self, serialport)
 
@@ -230,19 +241,50 @@ class ATmega128rfa1Programmer(STK500):
     if sig != 0x1ea701:
       raise IOError("Wrong signature. Expected {:06X}, got {:06X}".format(0x1ea701, sig))
 
+  def load_page(self, data):
+    self.program_flash_isp(
+        len(data), 
+        mode = 0xc1,
+        delay = 0x14,
+        cmd1 = 0x40,
+        cmd2 = 0x4c,
+        cmd3 = 0x20,
+        poll1 = 0,
+        poll2 = 0,
+        data=data)
+
+  def load_address(self, byteaddr):
+    STK500.load_address(self, byteaddr/self.WORDSIZE)
+
+  def load_data(self, data, blocksize = 0x0100):
+    size = len(data)
+    currentByteAddr = 0
+    while currentByteAddr < size:
+      # Check to see if the page is a whole page of 0xff. If it is, no need to program it
+      # print "Loading address {:04X}.".format(currentByteAddr)
+      isblank = reduce(
+          lambda x, y: True if x and y == 0xff else False,
+          data[currentByteAddr:currentByteAddr+blocksize], 
+          True )
+      if not isblank:
+        self.load_address(currentByteAddr)
+        self.load_page(data[currentByteAddr:currentByteAddr+blocksize])
+      currentByteAddr += blocksize
+
 class _CommsEngine():
   def __init__(self, ser): 
     self.ser = ser
     self.bytes = bytearray()
+    self.seqNum = 0 
 
-  def sendrecv(self, seq, data, timeout = 1):
+  def sendrecv(self, data, timeout = 1):
+    self.seqNum += 1
     self.numerrs = 0
-    self.seqNum = seq
     self.bytes = bytearray()
     self.ser.setTimeout(timeout)
     bytes = bytearray()
     bytes += bytearray([0x1B])
-    bytes += bytearray([seq])
+    bytes += bytearray([self.seqNum&0xff])
     size = len(data)
     bytes += bytearray([ (size >> 8) & 0x00ff ])
     bytes += bytearray([ size & 0x00ff ])
@@ -271,7 +313,7 @@ class _CommsEngine():
     bytes = bytearray(self.ser.read())
     if len(bytes) < 1:
       raise IOError("Message timed out.")
-    if bytes[0] != self.seqNum:
+    if bytes[0] != (self.seqNum & 0xff):
       self.start()
     else:
       self.bytes += bytes
@@ -406,15 +448,19 @@ class HexFile():
     if mysum != 0:
       raise BytesWarning("Checksum failed." + string)
 
+  def __getitem__(self, index):
+    return self.data[index]
+
+  def __len__(self):
+    return len(self.data)
 
 if __name__ == '__main__':
   s = ATmega128rfa1Programmer("/dev/ttyACM0")
   s.sign_on()
   s.enter_progmode_isp()
   s.check_signature()
-  """
   h = HexFile()
   h.fromIHexFile('dof.hex')
   h.fromIHexFile('bootloader.hex')
-  print h.toIHexString(blocksize=0x20)
-  """
+  s.load_data(h)
+#print h.toIHexString(blocksize=0x20)

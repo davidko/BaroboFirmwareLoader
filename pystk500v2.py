@@ -114,7 +114,121 @@ class STK500():
 
   def sign_on(self):
     resp = self.comms.sendrecv(self.seq, [self.CMD_SIGN_ON], 0.2)
-    print resp[3:]
+    if resp[3:] == 'AVRISP_2':
+      self.programmertype = 'avrisp2'
+    elif resp[3:] == 'STK500_2':
+      self.programmertype = 'stk500_2'
+    else:
+      raise Exception("Unkown programmer type: {0}".format(resp[3:]))
+    self.seq += 1
+
+  def set_parameter(self, param, value):
+    resp = self.comms.sendrecv(self.seq, 
+        [self.CMD_SET_PARAMETER, param, value])
+    if resp[0] != self.CMD_SET_PARAMETER or resp[1] != self.STATUS_CMD_OK:
+      raise IOError("Error setting parameter {0} to value {0}.".format(param, value))
+    self.seq += 1
+
+  def get_parameter(self, param):
+    resp = self.comms.sendrecv(self.seq, 
+        [self.CMD_GET_PARAMETER, param])
+    if resp[0] != self.CMD_GET_PARAMETER or resp[1] != self.STATUS_CMD_OK:
+      raise IOError("Error getting parameter: {0}.".format(param))
+    else:
+      self.seq += 1
+      return resp[2]
+
+  def osccal(self):
+    resp = self.comms.sendrecv(self.seq, [self.CMD_OSCCAL])
+    return resp[1]
+
+  def load_address(self, address):
+    addrbytes = bytearray(4)
+    addrbytes[0] = (address >> 24) & 0x00ff
+    addrbytes[1] = (address >> 16) & 0x00ff
+    addrbytes[2] = (address >> 8) & 0x00ff
+    addrbytes[3] = address & 0x00ff
+    resp = self.comms.sendrecv(self.seq, 
+        bytearray([self.CMD_LOAD_ADDRESS]) + addrbytes)
+    if resp[0] != self.CMD_LOAD_ADDRESS or resp[1] != self.STATUS_CMD_OK:
+      raise IOError("Error loading address.")
+    self.seq += 1
+
+  def enter_progmode_isp(
+      self, 
+      timeout, 
+      stabDelay, 
+      cmdexeDelay, 
+      synchLoops, 
+      byteDelay, 
+      pollValue, 
+      pollIndex, 
+      cmdbytes):
+    if len(cmdbytes) != 4:
+      raise Exception("Expected 4 command bytes. Got {0}.".format(len(cmdbytes)))
+    resp = self.comms.sendrecv(
+        self.seq, 
+        bytearray(
+          [
+            self.CMD_ENTER_PROGMODE_ISP, 
+            timeout,
+            stabDelay,
+            cmdexeDelay,
+            synchLoops,
+            byteDelay,
+            pollValue,
+            pollIndex
+          ]
+        ) + bytearray(cmdbytes), 5 )
+    if resp[0] != self.CMD_ENTER_PROGMODE_ISP or resp[1] != self.STATUS_CMD_OK:
+      raise IOError("Could not enter programming mode")
+    self.seq += 1
+
+  def spi_multi(self, numRX, data, rxStartAddr):
+    resp = self.comms.sendrecv(self.seq,
+        bytearray([self.CMD_SPI_MULTI, len(data), numRX, rxStartAddr]) + bytearray(data))
+    if resp[0] != self.CMD_SPI_MULTI or resp[1] != self.STATUS_CMD_OK:
+      raise IOError("Error executing ISP command.")
+    self.seq += 1
+    return resp[2:-1]
+
+class ATmega128rfa1Programmer(STK500):
+  def __init__(self, serialport):
+    STK500.__init__(self, serialport)
+
+  def enter_progmode_isp(
+      self, 
+      timeout = 0xc8, 
+      stabDelay = 0x64, 
+      cmdexeDelay = 0x19, 
+      synchLoops = 0x20, 
+      byteDelay = 0x00, 
+      pollValue = 0x53, 
+      pollIndex = 0x03, 
+      cmdbytes = bytearray([0xac, 0x53, 0, 0])
+      ):
+    return STK500.enter_progmode_isp(
+        self,
+        timeout,
+        stabDelay,
+        cmdexeDelay,
+        synchLoops,
+        byteDelay,
+        pollValue,
+        pollIndex,
+        cmdbytes)
+
+  def get_signature_byte(self, byte):
+    data = self.spi_multi(4, [0x30, 0, byte, 0], 0)
+    return data[3]
+
+  def check_signature(self):
+    sig = 0
+    for i in range(0, 3):
+      sig |= self.get_signature_byte(i) << ((2-i)*8)
+    #print "{:06X}".format(sig)
+    if sig != 0x1ea701:
+      raise IOError("Wrong signature. Expected {:06X}, got {:06X}".format(0x1ea701, sig))
 
 class _CommsEngine():
   def __init__(self, ser): 
@@ -124,6 +238,7 @@ class _CommsEngine():
   def sendrecv(self, seq, data, timeout = 1):
     self.numerrs = 0
     self.seqNum = seq
+    self.bytes = bytearray()
     self.ser.setTimeout(timeout)
     bytes = bytearray()
     bytes += bytearray([0x1B])
@@ -196,9 +311,8 @@ class _CommsEngine():
     else:
       sum = reduce(lambda x, y: x^y, self.bytes)
       if sum != bytes[0]:
+        print "Checksum mismatch: expected {:02X}, got {:02X}".format(sum, bytes[0])
         self.start()
-      
-
 
 class HexFile():
   def __init__(self):
@@ -294,8 +408,10 @@ class HexFile():
 
 
 if __name__ == '__main__':
-  s = STK500("/dev/ttyACM0")
+  s = ATmega128rfa1Programmer("/dev/ttyACM0")
   s.sign_on()
+  s.enter_progmode_isp()
+  s.check_signature()
   """
   h = HexFile()
   h.fromIHexFile('dof.hex')

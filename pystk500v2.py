@@ -8,14 +8,14 @@ class HexFile():
     self.data = bytearray(0)
     self.extaddr = 0 # Extended address (Upper byte of address)
 
-  def fromIHexFile(self, filename):
+  def fromIHexFile(self, filename, offset=0):
     f = open(filename, 'r')
-    self.fromIHexString(f.read())
+    self.fromIHexString(f.read(), offset)
     f.close()
 
-  def fromIHexString(self, string):
+  def fromIHexString(self, string, offset=0):
     for substr in string.split('\n'):
-      self._parseLine(substr)
+      self._parseLine(substr, offset)
 
   def toIHexString(self, blocksize=0x10):
     currentAddr = 0
@@ -54,13 +54,14 @@ class HexFile():
       mysum += int(hexstring[i:i+2], 16)
     return "{:02X}".format((~mysum+1)&0x00ff)
 
-  def _parseLine(self, string):
+  def _parseLine(self, string, offset=0):
     if len(string) == 0:
       return
     if string[0] != ':':
       raise BytesWarning("Parse error: Expected ':'")
     size = int(string[1:3], 16)
     address = int(string[3:7], 16)
+    address += offset
     memtype = int(string[7:9], 16)
     data = []
     for i,j in enumerate(range(9,9+size*2,2)):
@@ -70,6 +71,10 @@ class HexFile():
     self._checksum(string)
     if memtype == 4:
       self.extaddr = data[0]<<8 | data[1]
+    elif memtype == 2:
+      self.extaddr = data[0] >> 4
+      offset += data[1] << 4
+      offset += (data[0] & 0x00ff) << 12
     # See if the address is out of range of our current size. If so, pad with 0xFF
     address = (self.extaddr << 16) + address;
     oldlen = len(self.data)
@@ -90,5 +95,6 @@ class HexFile():
 
 if __name__ == '__main__':
   h = HexFile()
-  h.fromIHexFile('hex2')
-  print h.toIHexString()
+  h.fromIHexFile('dof.hex')
+  h.fromIHexFile('bootloader.hex')
+  print h.toIHexString(blocksize=0x20)

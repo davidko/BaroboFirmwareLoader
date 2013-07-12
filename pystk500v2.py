@@ -202,6 +202,15 @@ class STK500():
     if resp[0] != self.CMD_PROGRAM_FLASH_ISP or resp[1] != self.STATUS_CMD_OK:
       raise IOError("Error programming flash.")
 
+  def read_flash_isp(self, numbytes, cmd1=0x20):
+    buf = bytearray([self.CMD_READ_FLASH_ISP])
+    buf += bytearray( [(numbytes >> 8) & 0x00ff, numbytes & 0x00ff, cmd1] )
+    resp = self.comms.sendrecv(buf)
+    if resp[0] != self.CMD_READ_FLASH_ISP or resp[1] != self.STATUS_CMD_OK:
+      raise IOError("Error reading page from flash memory")
+    return resp[2:-1]
+
+
 class ATmega128rfa1Programmer(STK500):
   WORDSIZE = 2 # Word size in bytes, for addressing
   def __init__(self, serialport):
@@ -241,6 +250,9 @@ class ATmega128rfa1Programmer(STK500):
     if sig != 0x1ea701:
       raise IOError("Wrong signature. Expected {:06X}, got {:06X}".format(0x1ea701, sig))
 
+  def chip_erase_isp(self):
+    STK500.chip_erase_isp(self, 0x37,0x00, [0xac,0x80,0,0])
+
   def load_page(self, data):
     self.program_flash_isp(
         len(data), 
@@ -261,7 +273,6 @@ class ATmega128rfa1Programmer(STK500):
     currentByteAddr = 0
     while currentByteAddr < size:
       # Check to see if the page is a whole page of 0xff. If it is, no need to program it
-      # print "Loading address {:04X}.".format(currentByteAddr)
       isblank = reduce(
           lambda x, y: True if x and y == 0xff else False,
           data[currentByteAddr:currentByteAddr+blocksize], 
@@ -270,6 +281,30 @@ class ATmega128rfa1Programmer(STK500):
         self.load_address(currentByteAddr)
         self.load_page(data[currentByteAddr:currentByteAddr+blocksize])
       currentByteAddr += blocksize
+
+  def check_data(self, hexdata, blocksize = 0x0100):
+    size = len(hexdata)
+    self.load_address(0)
+    self.mydata = bytearray()
+    while len(self.mydata) < size:
+      if size - len(self.mydata) >= blocksize:
+        self.mydata += bytearray(self.read_flash_isp(blocksize))
+      else:
+        self.mydata += bytearray(self.read_flash_isp(size-len(self.mydata)))
+    if self.mydata != bytearray(hexdata):
+      for i in range(0, len(hexdata)):
+        if self.mydata[i] != hexdata[i]:
+          print "Mismatch at byte 0x{:04X}: 0x{:02X} - 0x{:02X}".format(i, self.mydata[i], hexdata[i])
+      raise Exception("Flash verification failed.")
+
+  def write_hfuse(self, byte=0xd8):
+    self.spi_multi(4, [0xac, 0xA8, 0x00, byte], 0)
+
+  def write_lfuse(self, byte=0xef):
+    self.spi_multi(4, [0xac, 0xA0, 0x00, byte], 0)
+
+  def write_efuse(self, byte=0xff):
+    self.spi_multi(4, [0xac, 0xA4, 0x00, byte], 0)
 
 class _CommsEngine():
   def __init__(self, ser): 
@@ -460,7 +495,12 @@ if __name__ == '__main__':
   s.enter_progmode_isp()
   s.check_signature()
   h = HexFile()
-  h.fromIHexFile('dof.hex')
+#h.fromIHexFile('dof.hex')
   h.fromIHexFile('bootloader.hex')
+  s.chip_erase_isp()
   s.load_data(h)
+  s.check_data(h)
+  s.write_hfuse()
+  s.write_lfuse()
+  s.write_efuse()
 #print h.toIHexString(blocksize=0x20)

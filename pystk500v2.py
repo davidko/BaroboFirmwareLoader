@@ -4,6 +4,7 @@ PGM03A for programming AVR chips.
 """
 
 import serial
+import threading
 
 class STK500():
   MESSAGE_START                       = 0x1B        
@@ -215,6 +216,7 @@ class ATmega128rfa1Programmer(STK500):
   WORDSIZE = 2 # Word size in bytes, for addressing
   def __init__(self, serialport):
     STK500.__init__(self, serialport)
+    self.progress = 0.0
 
   def enter_progmode_isp(
       self, 
@@ -281,6 +283,7 @@ class ATmega128rfa1Programmer(STK500):
         self.load_address(currentByteAddr)
         self.load_page(data[currentByteAddr:currentByteAddr+blocksize])
       currentByteAddr += blocksize
+      self.progress = (float(currentByteAddr)/size) * 0.5
 
   def check_data(self, hexdata, blocksize = 0x0100):
     size = len(hexdata)
@@ -291,10 +294,13 @@ class ATmega128rfa1Programmer(STK500):
         self.mydata += bytearray(self.read_flash_isp(blocksize))
       else:
         self.mydata += bytearray(self.read_flash_isp(size-len(self.mydata)))
+      self.progress = (float(len(self.mydata))/size)*0.5 + 0.5
     if self.mydata != bytearray(hexdata):
+      """
       for i in range(0, len(hexdata)):
         if self.mydata[i] != hexdata[i]:
           print "Mismatch at byte 0x{:04X}: 0x{:02X} - 0x{:02X}".format(i, self.mydata[i], hexdata[i])
+      """
       raise Exception("Flash verification failed.")
 
   def write_hfuse(self, byte=0xd8):
@@ -305,6 +311,52 @@ class ATmega128rfa1Programmer(STK500):
 
   def write_efuse(self, byte=0xff):
     self.spi_multi(4, [0xac, 0xA4, 0x00, byte], 0)
+
+  def read_hfuse(self):
+    resp = self.spi_multi(4, [0x58, 0x08, 0x00, 0x00], 0)
+    return resp[3]
+
+  def read_lfuse(self):
+    resp = self.spi_multi(4, [0x50, 0x00, 0x00, 0x00], 0)
+    return resp[3]
+
+  def read_efuse(self):
+    resp = self.spi_multi(4, [0x50, 0x08, 0x00, 0x00], 0)
+    return resp[3]
+
+  def programAll(self, bootloader="bootloader.hex", firmware="dof.hex"):
+    self.sign_on()
+    self.enter_progmode_isp()
+    self.check_signature()
+    h = HexFile()
+    h.fromIHexFile(bootloader)
+    h.fromIHexFile(firmware)
+    self.chip_erase_isp()
+    self.load_data(h)
+    self.check_data(h)
+    self.write_hfuse()
+    self.write_lfuse()
+    self.write_efuse()
+
+  def _tryProgramAll(self, bootloader="bootloader.hex", firmware="dof.hex"):
+    self.threadException = None
+    try:
+      self.programAll(bootloader=bootloader, firmware=firmware)
+    except Exception as e:
+      self.threadException = e
+
+  def getProgress(self):
+    return self.progress
+
+  def programAllAsync(self):
+    self.thread = threading.Thread(target=self._tryProgramAll)
+    self.thread.start()
+
+  def isProgramming(self):
+    return self.thread.isAlive()
+
+  def getLastException(self):
+    return self.threadException
 
 class _CommsEngine():
   def __init__(self, ser): 
@@ -404,6 +456,7 @@ class HexFile():
 
   def fromIHexString(self, string, offset=0):
     """Parse an Intel hex string."""
+    self.extaddr = 0
     for substr in string.split('\n'):
       self._parseLine(substr, offset)
 
@@ -499,8 +552,11 @@ if __name__ == '__main__':
   h.fromIHexFile('bootloader.hex')
   s.chip_erase_isp()
   s.load_data(h)
-  s.check_data(h)
+#s.check_data(h)
   s.write_hfuse()
   s.write_lfuse()
   s.write_efuse()
+  print "{:02X}".format(s.read_hfuse())
+  print "{:02X}".format(s.read_lfuse())
+  print "{:02X}".format(s.read_efuse())
 #print h.toIHexString(blocksize=0x20)

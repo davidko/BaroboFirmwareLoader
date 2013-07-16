@@ -176,7 +176,9 @@ class STK500():
           ]
         ) + bytearray(cmdbytes), 5 )
     if resp[0] != self.CMD_ENTER_PROGMODE_ISP or resp[1] != self.STATUS_CMD_OK:
-      raise IOError("Could not enter programming mode")
+      raise IOError("Could not enter programming mode. Please make sure the "
+          "board is receiving power and is correctly loaded into the programming "
+          "jig.")
 
   def spi_multi(self, numRX, data, rxStartAddr):
     resp = self.comms.sendrecv(

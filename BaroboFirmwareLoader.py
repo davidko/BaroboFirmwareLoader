@@ -13,6 +13,7 @@ import barobo
 import pystk500v2 as stk
 import os
 import random
+import time
 
 def _getSerialPorts():
   if os.name == 'nt':
@@ -74,6 +75,7 @@ class MainPanel(wx.Panel):
 
     self.flashButton = wx.Button(self, label="Flash and Test board")    
     self.flashButton.Disable()
+    self.Bind(wx.EVT_BUTTON, self.onFlashButtonClicked, self.flashButton)
 
     bsizer.Add(self.flashButton, 0, wx.EXPAND|wx.ALL, 10)
     self.mainSizer.Add(bsizer, 0, wx.EXPAND|wx.ALL, 25)
@@ -85,12 +87,14 @@ class MainPanel(wx.Panel):
     hbuttonsizer = wx.BoxSizer(wx.HORIZONTAL)
     self.tempIdText = wx.TextCtrl(self, -1)
     self.setTempIdButton = wx.Button(self, label="Set Temporary ID")
+    self.Bind(wx.EVT_BUTTON, self.onSetIDClicked, self.setTempIdButton)
     hbuttonsizer.Add( wx.StaticText(self, -1, "Temporary Id:", style=wx.ALIGN_RIGHT), 0, wx.ALIGN_RIGHT)
     hbuttonsizer.Add(self.tempIdText, 0, wx.EXPAND)
     hbuttonsizer.Add(self.setTempIdButton, 0, wx.EXPAND)
 
     bsizer.Add(hbuttonsizer, 0, wx.EXPAND|wx.ALL, 10)
     runTestButton = wx.Button(self, label="Run Test Routine")
+    self.Bind(wx.EVT_BUTTON, self.onRunTestClicked, runTestButton)
     bsizer.Add(runTestButton, 0, wx.EXPAND|wx.ALL, 10)
 
     self.mainSizer.Add(bsizer, 0, wx.EXPAND|wx.ALL, 25)
@@ -99,8 +103,6 @@ class MainPanel(wx.Panel):
     self.SetAutoLayout(1)
     self.mainSizer.Fit(self)
 
-    # Connect button handlers
-    self.Bind(wx.EVT_BUTTON, self.onFlashButtonClicked, self.flashButton)
 
   def onFlashButtonClicked(self, event):
     try:
@@ -123,9 +125,9 @@ class MainPanel(wx.Panel):
                             style = wx.PD_APP_MODAL | wx.PD_ELAPSED_TIME
                             )
     # Generate a random ID
-    serialID = "{:04d}".format(random.randint(1, 9999))
-    self.tempIdText.SetValue(serialID)
-    programmer.programAllAsync(serialID=serialID)
+    self.serialID = "{:04d}".format(random.randint(1000, 9999))
+    self.tempIdText.SetValue(self.serialID)
+    programmer.programAllAsync(serialID=self.serialID)
 
     while programmer.isProgramming():
       dlg.Update(programmer.getProgress()*100)
@@ -144,17 +146,77 @@ class MainPanel(wx.Panel):
       dlg.ShowModal()
       dlg.Destroy()
 
-  def onSetIDCLicked(self, event):
+  def onSetIDClicked(self, event):
     pass
 
   def onRunTestClicked(self, event):
-    pass
+    import threading
+    testthread = threading.Thread(target=self.runTestRoutine)
+    testthread.start()
+    dlg = wx.ProgressDialog("Testing board...",
+        "Testing board...",
+        parent=self,
+        style=wx.PD_APP_MODAL)
+    while testthread.is_alive():
+      dlg.Pulse()
+      time.sleep(0.25)
+    dlg.Destroy()
+
+  def runTestRoutine(self):
+    print "Testing..."
+    mybot = barobo.Linkbot()
+    numtries = 6
+    for i in range (numtries):
+      try:
+        self.serialID = self.tempIdText.GetValue()
+        print "Connecting to {0}...".format(self.serialID)
+        mybot.connectWithSerialID(str(self.serialID))
+        break
+      except Exception as e:
+        if i == (numtries-1):
+          dlg = wx.MessageDialog(self,
+              'Could not connect wirelessly to Serial ID {0}: {1}'.format(self.serialID, str(e)),
+              'Error',
+              wx.OK|wx.ICON_WARNING)
+          dlg.ShowModal()
+          dlg.Destroy()
+          return 
+        else:
+          pass
+
+    try:
+      for i in range(1, 4):
+        mybot.setMotorPower(i, 100)
+      time.sleep(1)
+      for i in range(1, 4):
+        mybot.setMotorPower(i, -100)
+      time.sleep(1)
+      mybot.stop()
+      mybot.setBuzzerFrequency(220)
+      mybot.setColorRGB(0xff, 0, 0)
+      time.sleep(.5)
+      mybot.setBuzzerFrequency(440)
+      mybot.setColorRGB(0, 0xff, 0)
+      time.sleep(.5)
+      mybot.setBuzzerFrequency(220)
+      mybot.setColorRGB(0, 0, 0xff)
+      time.sleep(.5)
+      mybot.setBuzzerFrequency(0)
+    except Exception as e:
+      dlg = wx.MessageDialog(self,
+          'Testing board with ID {0} failed: {1}'.format(self.serialID, str(e)),
+          'Error',
+          wx.OK|wx.ICON_WARNING)
+      dlg.ShowModal()
+      dlg.Destroy()
+
 
   def onConnectDongleClicked(self, event):
     self.dongle = barobo.Linkbot()
     try:
       print "Connecting to {0}...".format(self.dongleComboBox.GetValue())
       self.dongle.connectWithTTY(str(self.dongleComboBox.GetValue()))
+      self.dongle._setDongle()
       self.flashButton.Enable()
       print "Connect success"
       event.GetEventObject().Disable()

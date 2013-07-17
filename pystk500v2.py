@@ -5,6 +5,7 @@ PGM03A for programming AVR chips.
 
 import serial
 import threading
+import time
 
 class STK500():
   MESSAGE_START                       = 0x1B        
@@ -213,6 +214,24 @@ class STK500():
       raise IOError("Error reading page from flash memory")
     return resp[2:-1]
 
+  def program_eeprom_isp(self, numbytes, mode, delay, cmd1, cmd2, cmd3, poll1, poll2, data):
+    buf = bytearray([self.CMD_PROGRAM_EEPROM_ISP])
+    buf += bytearray([ (numbytes >> 8) & 0x00ff ])
+    buf += bytearray([ numbytes & 0x00ff ])
+    buf += bytearray([ mode, delay, cmd1, cmd2, cmd3, poll1, poll2])
+    buf += bytearray( data )
+    resp = self.comms.sendrecv(buf, timeout=5)
+    if resp[0] != self.CMD_PROGRAM_EEPROM_ISP or resp[1] != self.STATUS_CMD_OK:
+      raise IOError("Error programming eeprom.")
+
+  def read_eeprom_isp(self, numbytes, cmd1=0xA0):
+    buf = bytearray([self.CMD_READ_EEPROM_ISP])
+    buf += bytearray( [(numbytes >> 8) & 0x00ff, numbytes & 0x00ff, cmd1] )
+    resp = self.comms.sendrecv(buf)
+    if resp[0] != self.CMD_READ_EEPROM_ISP or resp[1] != self.STATUS_CMD_OK:
+      raise IOError("Error reading page from eeprom memory")
+    return resp[2:-1]
+
 
 class ATmega128rfa1Programmer(STK500):
   WORDSIZE = 2 # Word size in bytes, for addressing
@@ -339,6 +358,8 @@ class ATmega128rfa1Programmer(STK500):
     self.write_hfuse()
     self.write_lfuse()
     self.write_efuse()
+    if self.serialID is not None:
+      self.writeEEPROM(0x412, self.serialID)
 
   def _tryProgramAll(self, bootloader="bootloader.hex", firmware="dof.hex"):
     self.threadException = None
@@ -350,7 +371,10 @@ class ATmega128rfa1Programmer(STK500):
   def getProgress(self):
     return self.progress
 
-  def programAllAsync(self):
+  def programAllAsync(self, serialID="1234"):
+    if serialID != None and len(serialID) != 4:
+      raise Exception('The Serial ID must be a 4 digit alphanumeric string.')
+    self.serialID=serialID
     self.thread = threading.Thread(target=self._tryProgramAll)
     self.thread.start()
 
@@ -359,6 +383,15 @@ class ATmega128rfa1Programmer(STK500):
 
   def getLastException(self):
     return self.threadException
+
+  def writeEEPROMbyte(self, address, byte):
+    self.spi_multi(4, bytearray([0xc0, (address >> 8)&0x000f, address&0x00ff, byte]), 0)
+  
+  def writeEEPROM(self, startaddress, bytes):
+    time.sleep(0.02)
+    for offset, byte in enumerate(bytes):
+      self.writeEEPROMbyte(startaddress+offset, byte)
+      time.sleep(0.02)
 
 class _CommsEngine():
   def __init__(self, ser): 
@@ -549,6 +582,8 @@ if __name__ == '__main__':
   s.sign_on()
   s.enter_progmode_isp()
   s.check_signature()
+  s.writeEEPROM(0x412, "abcd")
+  """
   h = HexFile()
 #h.fromIHexFile('dof.hex')
   h.fromIHexFile('bootloader.hex')
@@ -562,3 +597,4 @@ if __name__ == '__main__':
   print "{:02X}".format(s.read_lfuse())
   print "{:02X}".format(s.read_efuse())
 #print h.toIHexString(blocksize=0x20)
+  """

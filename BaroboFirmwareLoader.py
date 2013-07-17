@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 """
 BaroboFirmwareLoader
 
@@ -10,6 +12,7 @@ import wx
 import barobo
 import pystk500v2 as stk
 import os
+import random
 
 def _getSerialPorts():
   if os.name == 'nt':
@@ -26,9 +29,9 @@ def _getSerialPorts():
     from serial.tools import list_ports
     return [port[0] for port in list_ports.comports()]
 
-
 class MainPanel(wx.Panel):
   def __init__(self, parent):
+    random.seed()
     wx.Panel.__init__(self, parent)
 
     # Set up known serial ports
@@ -119,7 +122,10 @@ class MainPanel(wx.Panel):
                             parent=self,
                             style = wx.PD_APP_MODAL | wx.PD_ELAPSED_TIME
                             )
-    programmer.programAllAsync()
+    # Generate a random ID
+    serialID = "{:04d}".format(random.randint(1, 9999))
+    self.tempIdText.SetValue(serialID)
+    programmer.programAllAsync(serialID=serialID)
 
     while programmer.isProgramming():
       dlg.Update(programmer.getProgress()*100)
@@ -158,6 +164,10 @@ class MainPanel(wx.Panel):
           'Error', wx.OK | wx.ICON_WARNING )
       dlg.ShowModal()
       dlg.Destroy()
+
+  def onSerialComboBox(self, event):
+    self.serialPorts = _getSerialPorts()
+    self.serialPorts.sort()
 
 
 if __name__ == "__main__":

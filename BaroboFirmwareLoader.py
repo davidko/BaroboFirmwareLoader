@@ -32,6 +32,7 @@ def _getSerialPorts():
 
 class MainPanel(wx.Panel):
   def __init__(self, parent):
+    self.dongle = None
     random.seed()
     wx.Panel.__init__(self, parent)
 
@@ -74,7 +75,6 @@ class MainPanel(wx.Panel):
     bsizer.Add(hsizer, 0, wx.EXPAND)
 
     self.flashButton = wx.Button(self, label="Flash and Test board")    
-    self.flashButton.Disable()
     self.Bind(wx.EVT_BUTTON, self.onFlashButtonClicked, self.flashButton)
 
     bsizer.Add(self.flashButton, 0, wx.EXPAND|wx.ALL, 10)
@@ -146,13 +146,25 @@ class MainPanel(wx.Panel):
       dlg.ShowModal()
       dlg.Destroy()
 
+    self.onRunTestClicked(None)
+
   def onSetIDClicked(self, event):
     pass
 
   def onRunTestClicked(self, event):
+    if self.dongle is None:
+      dlg = wx.MessageDialog(self, 'There is currently no dongle associated with this '
+          'utility. Please select and connect to a Linkbot dongle using the '
+          '"Dongle Management" area above and try again.',
+          'Warning',
+          wx.OK|wx.ICON_WARNING)
+      dlg.ShowModal()
+      dlg.Destroy()
+      return
     import threading
     testthread = threading.Thread(target=self.runTestRoutine)
     testthread.start()
+    self.testingException = None
     dlg = wx.ProgressDialog("Testing board...",
         "Testing board...",
         parent=self,
@@ -161,11 +173,19 @@ class MainPanel(wx.Panel):
       dlg.Pulse()
       time.sleep(0.25)
     dlg.Destroy()
+    if self.testingException:
+      dlg = wx.MessageDialog(self,
+          'Testing board with ID {0} failed: {1}'.format(self.serialID, str(self.testingException)),
+          'Error',
+          wx.OK|wx.ICON_WARNING)
+      dlg.ShowModal()
+      dlg.Destroy()
+
 
   def runTestRoutine(self):
     print "Testing..."
     mybot = barobo.Linkbot()
-    numtries = 6
+    numtries = 10
     for i in range (numtries):
       try:
         self.serialID = self.tempIdText.GetValue()
@@ -203,12 +223,8 @@ class MainPanel(wx.Panel):
       time.sleep(.5)
       mybot.setBuzzerFrequency(0)
     except Exception as e:
-      dlg = wx.MessageDialog(self,
-          'Testing board with ID {0} failed: {1}'.format(self.serialID, str(e)),
-          'Error',
-          wx.OK|wx.ICON_WARNING)
-      dlg.ShowModal()
-      dlg.Destroy()
+      self.testingException = e
+      return
 
 
   def onConnectDongleClicked(self, event):
@@ -226,6 +242,7 @@ class MainPanel(wx.Panel):
           'Error', wx.OK | wx.ICON_WARNING )
       dlg.ShowModal()
       dlg.Destroy()
+      self.dongle = None
 
   def onSerialComboBox(self, event):
     self.serialPorts = _getSerialPorts()

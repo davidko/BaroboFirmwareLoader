@@ -164,6 +164,7 @@ class MainPanel(wx.Panel):
                              )
       dlg.ShowModal()
       dlg.Destroy()
+      return
 
     self.onRunTestClicked(None)
 

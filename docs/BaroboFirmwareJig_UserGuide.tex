@@ -31,7 +31,7 @@
 %	DOCUMENT INFORMATION
 %----------------------------------------------------------------------------------------
 
-\title{Barobo Linkbot Firmware Flashing Jig \\ User Guide} % Title
+\title{Barobo Linkbot USB and Main Motherboard Flashing Jigs \\ User Guide} % Title
 
 \author{David \textsc{Ko}} % Author name
 
@@ -41,7 +41,7 @@
 
 \maketitle % Insert the title, author and date
 
-\section{Procedure for Flashing and Testing Linkbots}
+\section{Procedure for Flashing and Testing Linkbots Motherboards}
 \begin{enumerate}
 \item Disconnect all usb devices from the computer, except for critical devices
    such as keyboards and mice.
@@ -112,6 +112,33 @@
 \item \label{stopstep} Once the test routine is finished, the usb board may be removed from the
   motherboard and steps \ref{restartstep} through
   \ref{stopstep} may be repeated to flash additional motherboards.
+\end{enumerate}
+
+\section{Procedure for Flashing and Testing Linkbots USB Boards}
+
+\begin{enumerate}
+\item Attach the USB jig to the computer using a Mini-USB cable.
+
+   \begin{center}
+   \includegraphics[width=4in]{images/usb_jig.jpg}
+   \end{center}
+
+\item Start the program ``BaroboUSBFirmwareLoader'' by double clicking on the icon.
+
+\item \label{usbjig_step_begin} Affix the new USB board to be flashed onto the jig, making sure the pins
+on the jig line up with pads on the USB board. When it is correctly seated, a
+red light should turn on on the USB board.
+
+   \begin{center}
+   \includegraphics[width=2in]{images/usb_jig_pins.jpg}
+   \includegraphics[width=2in]{images/usb_jig_loaded.jpg}
+   \end{center}
+
+\item \label{usbjig_step_stop} Click on the button labeled ``Flash Linkbot USB Board''. A progress
+dialog box will be shown. If everything flashes correctly, the dialog box will
+close. Otherwise, an error message will be displayed.
+
+\item Steps \ref{usbjig_step_begin} through \ref{usbjig_step_stop} may be repeated to flash additional boards.
 \end{enumerate}
 
 \end{document}

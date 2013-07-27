@@ -225,10 +225,10 @@ class MainPanel(wx.Panel):
 
     try:
       for i in range(1, 4):
-        mybot.setMotorPower(i, 100)
+        mybot.setMotorPower(i, 50)
       time.sleep(1)
       for i in range(1, 4):
-        mybot.setMotorPower(i, -100)
+        mybot.setMotorPower(i, -50)
       time.sleep(1)
       mybot.stop()
       mybot.setBuzzerFrequency(220)

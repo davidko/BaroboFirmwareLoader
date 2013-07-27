@@ -345,13 +345,13 @@ class ATmega128rfa1Programmer(STK500):
     resp = self.spi_multi(4, [0x50, 0x08, 0x00, 0x00], 0)
     return resp[3]
 
-  def programAll(self, bootloader="bootloader.hex", firmware="dof.hex"):
+  def programAll(self, hexfiles=['bootloader.hex','dof.hex']):
     self.sign_on()
     self.enter_progmode_isp()
     self.check_signature()
     h = HexFile()
-    h.fromIHexFile(bootloader)
-    h.fromIHexFile(firmware)
+    for f in hexfiles:
+      h.fromIHexFile(f)
     self.chip_erase_isp()
     self.load_data(h)
     self.check_data(h)
@@ -361,10 +361,10 @@ class ATmega128rfa1Programmer(STK500):
     if self.serialID is not None:
       self.writeEEPROM(0x412, self.serialID)
 
-  def _tryProgramAll(self, bootloader="bootloader.hex", firmware="dof.hex"):
+  def _tryProgramAll(self, hexfiles=['bootloader.hex', 'dof.hex']):
     self.threadException = None
     try:
-      self.programAll(bootloader=bootloader, firmware=firmware)
+      self.programAll(hexfiles=hexfiles)
     except Exception as e:
       self.threadException = e
 
@@ -375,6 +375,160 @@ class ATmega128rfa1Programmer(STK500):
     if serialID != None and len(serialID) != 4:
       raise Exception('The Serial ID must be a 4 digit alphanumeric string.')
     self.serialID=serialID
+    self.thread = threading.Thread(target=self._tryProgramAll)
+    self.thread.start()
+
+  def isProgramming(self):
+    return self.thread.isAlive()
+
+  def getLastException(self):
+    return self.threadException
+
+  def writeEEPROMbyte(self, address, byte):
+    self.spi_multi(4, bytearray([0xc0, (address >> 8)&0x000f, address&0x00ff, byte]), 0)
+  
+  def writeEEPROM(self, startaddress, bytes):
+    time.sleep(0.02)
+    for offset, byte in enumerate(bytes):
+      self.writeEEPROMbyte(startaddress+offset, byte)
+      time.sleep(0.02)
+
+class ATmega32U4Programmer(STK500):
+  WORDSIZE = 2 # Word size in bytes, for addressing
+  def __init__(self, serialport):
+    STK500.__init__(self, serialport)
+    self.progress = 0.0
+
+  def enter_progmode_isp(
+      self, 
+      timeout = 0xc8, 
+      stabDelay = 0x64, 
+      cmdexeDelay = 0x19, 
+      synchLoops = 0x20, 
+      byteDelay = 0x00, 
+      pollValue = 0x53, 
+      pollIndex = 0x03, 
+      cmdbytes = bytearray([0xac, 0x53, 0, 0])
+      ):
+    return STK500.enter_progmode_isp(
+        self,
+        timeout,
+        stabDelay,
+        cmdexeDelay,
+        synchLoops,
+        byteDelay,
+        pollValue,
+        pollIndex,
+        cmdbytes)
+
+  def get_signature_byte(self, byte):
+    data = self.spi_multi(4, [0x30, 0, byte, 0], 0)
+    return data[3]
+
+  def check_signature(self):
+    sig = 0
+    for i in range(0, 3):
+      sig |= self.get_signature_byte(i) << ((2-i)*8)
+    #print "{:06X}".format(sig)
+    if sig != 0x1e9587:
+      raise IOError("Wrong signature. Expected {:06X}, got {:06X}".format(0x1e9587, sig))
+
+  def chip_erase_isp(self):
+    STK500.chip_erase_isp(self, 0x37,0x00, [0xac,0x80,0,0])
+
+  def load_page(self, data):
+    self.program_flash_isp(
+        len(data), 
+        mode = 0xc1,
+        delay = 0x06,
+        cmd1 = 0x40,
+        cmd2 = 0x4c,
+        cmd3 = 0x20,
+        poll1 = 0,
+        poll2 = 0,
+        data=data)
+
+  def load_address(self, byteaddr):
+    STK500.load_address(self, byteaddr/self.WORDSIZE)
+
+  def load_data(self, data, blocksize = 0x0080):
+    size = len(data)
+    currentByteAddr = 0
+    while currentByteAddr < size:
+      # Check to see if the page is a whole page of 0xff. If it is, no need to program it
+      isblank = reduce(
+          lambda x, y: True if x and y == 0xff else False,
+          data[currentByteAddr:currentByteAddr+blocksize], 
+          True )
+      if not isblank:
+        self.load_address(currentByteAddr)
+        self.load_page(data[currentByteAddr:currentByteAddr+blocksize])
+      currentByteAddr += blocksize
+      self.progress = (float(currentByteAddr)/size) * 0.5
+
+  def check_data(self, hexdata, blocksize = 0x0080):
+    size = len(hexdata)
+    self.load_address(0)
+    self.mydata = bytearray()
+    while len(self.mydata) < size:
+      if size - len(self.mydata) >= blocksize:
+        self.mydata += bytearray(self.read_flash_isp(blocksize))
+      else:
+        self.mydata += bytearray(self.read_flash_isp(size-len(self.mydata)))
+      self.progress = (float(len(self.mydata))/size)*0.5 + 0.5
+    if self.mydata != bytearray(hexdata):
+      """
+      for i in range(0, len(hexdata)):
+        if self.mydata[i] != hexdata[i]:
+          print "Mismatch at byte 0x{:04X}: 0x{:02X} - 0x{:02X}".format(i, self.mydata[i], hexdata[i])
+      """
+      raise Exception("Flash verification failed.")
+
+  def write_hfuse(self, byte=0xd9):
+    self.spi_multi(4, [0xac, 0xA8, 0x00, byte], 0)
+
+  def write_lfuse(self, byte=0xff):
+    self.spi_multi(4, [0xac, 0xA0, 0x00, byte], 0)
+
+  def write_efuse(self, byte=0xff):
+    self.spi_multi(4, [0xac, 0xA4, 0x00, byte], 0)
+
+  def read_hfuse(self):
+    resp = self.spi_multi(4, [0x58, 0x08, 0x00, 0x00], 0)
+    return resp[3]
+
+  def read_lfuse(self):
+    resp = self.spi_multi(4, [0x50, 0x00, 0x00, 0x00], 0)
+    return resp[3]
+
+  def read_efuse(self):
+    resp = self.spi_multi(4, [0x50, 0x08, 0x00, 0x00], 0)
+    return resp[3]
+
+  def programAll(self, hexfiles=['usb.hex']):
+    self.sign_on()
+    self.enter_progmode_isp()
+    self.check_signature()
+    h = HexFile()
+    for f in hexfiles:
+      h.fromIHexFile(f)
+    self.chip_erase_isp()
+    self.load_data(h)
+    self.check_data(h)
+    self.write_hfuse()
+    self.write_lfuse()
+
+  def _tryProgramAll(self, hexfiles=['usb.hex']):
+    self.threadException = None
+    try:
+      self.programAll(hexfiles=hexfiles)
+    except Exception as e:
+      self.threadException = e
+
+  def getProgress(self):
+    return self.progress
+
+  def programAllAsync(self):
     self.thread = threading.Thread(target=self._tryProgramAll)
     self.thread.start()
 

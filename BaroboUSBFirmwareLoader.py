@@ -103,7 +103,7 @@ class MainPanel(wx.Panel):
       return
 
     dlg = wx.ProgressDialog("Flashing Progress",
-                            "Loading Linkbot Firmware...",
+                            "Loading Linkbot USB Firmware...",
                             maximum=105,
                             parent=self,
                             style = wx.PD_APP_MODAL | wx.PD_ELAPSED_TIME

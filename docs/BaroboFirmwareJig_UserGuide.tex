@@ -41,7 +41,14 @@
 
 \maketitle % Insert the title, author and date
 
-\section{Procedure for Flashing and Testing Linkbots Motherboards}
+\section{Introduction}
+This document serves as a user guide for the usage of the Barobo Linkbot Motherboard flashing
+jig, it's accompanying application ``BaroboFirmwareLoader'', the Barobo Linkbot USB-Board 
+flashing jig, and it's accompanying application ``BaroboUSBFirmwareLoader''. Details regarding
+flashing the motherboard are in Section \ref{sec:flashMainBoard}, and details about
+flashing the USB boards are in Section \ref{sec:flashUSB} on page \pageref{sec:flashUSB}.
+
+\section{\label{sec:flashMainBoard}Procedure for Flashing and Testing Linkbots Motherboards}
 \begin{enumerate}
 \item Disconnect all usb devices from the computer, except for critical devices
    such as keyboards and mice.
@@ -114,7 +121,7 @@
   \ref{stopstep} may be repeated to flash additional motherboards.
 \end{enumerate}
 
-\section{Procedure for Flashing and Testing Linkbots USB Boards}
+\section{\label{sec:flashUSB} Procedure for Flashing and Testing Linkbots USB Boards}
 
 \begin{enumerate}
 \item Attach the USB jig to the computer using a Mini-USB cable.
@@ -124,6 +131,11 @@
    \end{center}
 
 \item Start the program ``BaroboUSBFirmwareLoader'' by double clicking on the icon.
+
+\item Under most circumstances, the default selected port in the
+``BaroboUSBFirmwareLoader'' application will be \texttt{/dev/ttyACM0}, which is
+usually correct. If there are other USB devices connected to the computer, the programmer
+may not be at \texttt{/dev/ttyACM0}, and the correct port will need to be chosen.
 
 \item \label{usbjig_step_begin} Affix the new USB board to be flashed onto the jig, making sure the pins
 on the jig line up with pads on the USB board. When it is correctly seated, a

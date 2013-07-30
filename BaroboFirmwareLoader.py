@@ -224,13 +224,6 @@ class MainPanel(wx.Panel):
           pass
 
     try:
-      for i in range(1, 4):
-        mybot.setMotorPower(i, 50)
-      time.sleep(1)
-      for i in range(1, 4):
-        mybot.setMotorPower(i, -50)
-      time.sleep(1)
-      mybot.stop()
       mybot.setBuzzerFrequency(220)
       mybot.setColorRGB(0xff, 0, 0)
       time.sleep(.5)

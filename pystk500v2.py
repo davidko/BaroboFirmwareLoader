@@ -234,6 +234,9 @@ class STK500():
 
 
 class ATmega128rfa1Programmer(STK500):
+  HWREV_MAJ = 2
+  HWREV_MIN = 0
+  HWREV_MIC = 0
   WORDSIZE = 2 # Word size in bytes, for addressing
   def __init__(self, serialport):
     STK500.__init__(self, serialport)
@@ -360,6 +363,9 @@ class ATmega128rfa1Programmer(STK500):
     self.write_efuse()
     if self.serialID is not None:
       self.writeEEPROM(0x412, self.serialID)
+    self.writeEEPROM(0x420, self.HWREV_MAJ)
+    self.writeEEPROM(0x421, self.HWREV_MIN)
+    self.writeEEPROM(0x422, self.HWREV_MIC)
 
   def _tryProgramAll(self, hexfiles=['bootloader.hex', 'dof.hex']):
     self.threadException = None
